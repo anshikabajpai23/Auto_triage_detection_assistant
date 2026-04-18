@@ -2,3 +2,4 @@
 - Ignored the '--' and 'nan' values in Priority column of gitbugs data for training
 - Didn't load Apache data
 - team name??
+- resolution na dropped
