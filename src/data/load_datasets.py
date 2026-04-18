@@ -226,6 +226,10 @@ def main():
     df = load_all()
     df = run_label_engineering(df)
 
+    before = len(df)
+    df = df[df["team"] != "unknown"].reset_index(drop=True)
+    print(f"Dropped {before - len(df):,} rows with team='unknown'. Remaining: {len(df):,}\n")
+
     train, val, test = stratified_split(df)
 
     
