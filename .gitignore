@@ -1,0 +1,104 @@
+# ---------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# ---------------------------------------------------------------
+# Data — never commit raw or processed datasets
+# ---------------------------------------------------------------
+data/raw/*
+data/processed/*
+data/preference_pairs/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/preference_pairs/.gitkeep
+
+# ---------------------------------------------------------------
+# Model checkpoints and weights — large binary files
+# ---------------------------------------------------------------
+checkpoints/sft/*
+checkpoints/reward_model/*
+checkpoints/ppo/*
+checkpoints/merged/*
+!checkpoints/sft/.gitkeep
+!checkpoints/reward_model/.gitkeep
+!checkpoints/ppo/.gitkeep
+!checkpoints/merged/.gitkeep
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+*.pkl
+
+# ---------------------------------------------------------------
+# Logs and outputs
+# ---------------------------------------------------------------
+logs/*
+!logs/.gitkeep
+results/*.png
+results/*.csv
+*.log
+*.out
+*.gitkeep
+*_bugs.csv
+*_combined.csv
+notebooks/gitbugs_downloads/*
+launch.json
+
+# ---------------------------------------------------------------
+# Feedback data (contains engineer corrections — PII risk)
+# ---------------------------------------------------------------
+feedback/*
+!feedback/.gitkeep
+
+# ---------------------------------------------------------------
+# Jupyter
+# ---------------------------------------------------------------
+.ipynb_checkpoints/
+*.ipynb_checkpoint
+
+# ---------------------------------------------------------------
+# Secrets and credentials
+# ---------------------------------------------------------------
+.env
+.env.*
+secrets.yaml
+wandb_key.txt
+
+# ---------------------------------------------------------------
+# W&B local artifacts
+# ---------------------------------------------------------------
+wandb/
+
+# ---------------------------------------------------------------
+# macOS
+# ---------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ---------------------------------------------------------------
+# IDEs
+# ---------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+feedback/.gitkeep

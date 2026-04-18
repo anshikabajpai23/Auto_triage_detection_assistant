@@ -2,10 +2,11 @@
 
 ## Project Overview
 
-Fine-tune LLaMA 3.2 1B on 238K real-world bug reports to produce a **3-head classifier** in a single forward pass:
+Fine-tune LLaMA 3.2 1B on real-world bug reports to produce a **2-head classifier** in a single forward pass:
 - **Severity** — P0–P4
 - **Team routing** — platform / database / frontend / backend / infra / security / mobile
-- **Over-escalation flag** — true / false (novel contribution; no existing triage dataset has this)
+
+Over-escalation is detected **at inference time** by comparing the model's predicted severity against the severity the engineer originally filed — no training label needed.
 
 Training pipeline mirrors production LLM alignment: SFT → Reward Model → PPO.
 
@@ -19,17 +20,16 @@ Raw bug reports (Eclipse Bugzilla + GitBugs)
 │        Data Pipeline            │
 │  - Priority normalization       │
 │  - Team label engineering       │
-│  - Over-escalation labels       │  ← novel, derived from resolution metadata
 │  - Text cleaning + tokenization │
 │  - Stratified train/val/test    │
 └─────────────┬───────────────────┘
-              │ 238K labeled prompt-completion pairs
+              │ labeled prompt-completion pairs
               ▼
 ┌─────────────────────────────────┐
 │   Stage 1: SFT (QLoRA)          │
 │  Base: LLaMA 3.2 1B             │
 │  Adapters: r=16, alpha=32       │  ← teaches format + baseline accuracy
-│  Output: severity|team|esc      │
+│  Output: severity|team          │
 │  Est: 1.5–2.5 GPU hrs           │
 └─────────────┬───────────────────┘
               │ SFT checkpoint
@@ -56,23 +56,25 @@ Raw bug reports (Eclipse Bugzilla + GitBugs)
 │   Streamlit UI                  │
 │  - Live inference               │
 │  - Confidence visualization     │
+│  - Over-escalation flag:        │
+│    predicted sev vs filed sev   │  ← inference-time comparison
 │  - Feedback loop → CSV → RM     │
 └─────────────────────────────────┘
 ```
 
-### Multi-Head Output Format
+### Model Output Format
 ```
-severity:P1 | team:platform | escalation:false
+severity:P1 | team:platform
 ```
-All three outputs are one token sequence — the reward model scores the entire string as a unit.
 
-### Over-Escalation Label Rule (3 conditions, ALL must hold)
-1. Filed priority is P0 or P1
-2. Resolution is `wontfix`, `invalid`, `worksforme`, `duplicate`, or `minor`
-   — OR filed severity is blocker/critical AND resolved severity is normal/minor/trivial
-3. Resolution time > 7 days
+### Over-Escalation Detection (inference time)
+No training label required. At inference:
+- Engineer provides the ticket text **and** the severity they filed
+- Model predicts the severity the text actually warrants
+- If `filed_severity < predicted_severity` → **over-escalation flagged**
+- If `filed_severity > predicted_severity` → **under-escalation flagged**
 
-Expected positive rate: 8–12% of all tickets.
+Example: filed P0, model predicts P2 → over-escalation warning shown in UI.
 
 ---
 
@@ -177,50 +179,43 @@ Tasks are grouped by phase. Work through them in order — each phase depends on
 
 #### 1B — Label Engineering
 - [ ] **1.2** Write priority normalization in `src/data/label_engineering.py`
-  - Map Eclipse severity: `blocker→P0`, `critical→P1`, `major→P2`, `normal→P3`, `minor/trivial/enhancement→P4`
-  - Map GitBugs priority fields to the same P0–P4 scale
+  - Map Eclipse severity: `blocker→P0`, `critical→P1`, `major→P2`, `normal→P3`, `minor/trivial→P4`
+  - Map GitBugs priority fields to the same P0–P4 scale using `GITBUGS_PRIORITY_MAP`
   - Assert no nulls remain in the normalized priority column
 - [ ] **1.3** Write team label engineering
   - Keyword-match `component` and `product` fields to 7 team buckets: `platform`, `database`, `frontend`, `backend`, `infra`, `security`, `mobile`
   - Assign `unknown` to anything that doesn't match; review the `unknown` bucket manually before training
   - Spot-check 200 random samples; document accuracy of the mapping in a comment
-- [ ] **1.4** Write over-escalation label engineering (the novel part)
-  - Implement the 3-condition rule exactly as specified
-  - Compute `resolution_time_days = (closed_at - created_at).dt.days`
-  - Add `is_over_escalated` boolean column
-  - Assert positive rate is between 6% and 15%; raise an error if outside this range
-  - Log class distribution counts so it's visible in output
 
 #### 1C — Text Cleaning
-- [ ] **1.5** Write text cleaning in `src/data/label_engineering.py` (or a helper)
+- [ ] **1.4** Write text cleaning in `src/data/label_engineering.py`
   - Strip HTML/XML tags with regex
   - Truncate stack traces: keep only the first 10 lines of any traceback
   - Normalize whitespace (tabs, multiple spaces, Windows newlines)
   - Truncate combined `title + body` to 400 tokens (count roughly as `len(text.split())`)
 
 #### 1D — Splitting & Formatting
-- [ ] **1.6** Write stratified train/val/test split (80/10/10) in `src/data/load_datasets.py`
-  - Stratify on `severity × is_over_escalated` jointly
-  - Assert escalation positives appear in all three splits
-  - Print split sizes and class distributions
-- [ ] **1.7** Write `src/data/format_prompts.py`
+- [ ] **1.5** Write stratified train/val/test split (80/10/10) in `src/data/load_datasets.py`
+  - Stratify on priority (P0–P4) to preserve class proportions across splits
+  - Print split sizes and priority distributions
+- [ ] **1.6** Write `src/data/format_prompts.py`
   - Wrap each sample in the instruction template:
     ```
     ### Incident report:
     {title}\n{body}
     ### Triage:
-    severity:{P} | team:{team} | escalation:{true/false}
+    severity:{P} | team:{team}
     ```
   - Tokenize using `AutoTokenizer` from LLaMA 3.2; pad/truncate to 512 tokens
   - Save as HuggingFace `DatasetDict` to `data/processed/` using `save_to_disk`
-- [ ] **1.8** Write `notebooks/01_eda.ipynb`
-  - Plot severity distribution, team distribution, escalation rate
-  - Plot resolution time histogram
-  - Show 5 example escalation-positive tickets to verify label quality
-- [ ] **1.9** Write `notebooks/02_label_analysis.ipynb`
+- [ ] **1.7** Write `notebooks/01_eda.ipynb`
+  - Plot severity distribution, team distribution
+  - Plot resolution time histogram (GitBugs source)
+  - Show sample tickets per priority level to verify label quality
+- [ ] **1.8** Write `notebooks/02_label_analysis.ipynb`
   - Show confusion between original priority and normalized P0–P4
   - Validate team label coverage (% with `unknown`)
-  - Show escalation positive/negative example pairs side by side
+  - Show example tickets per team bucket
 
 ---
 
@@ -395,17 +390,19 @@ Tasks are grouped by phase. Work through them in order — each phase depends on
   - `@st.cache_resource` to load merged model once
   - Load with `device_map="auto"`, `torch_dtype=torch.bfloat16`
 - [ ] **7.2** Write inference + output parsing
-  - `parse_triage_output(text)` — extract severity, team, escalation from the generated string
+  - `parse_triage_output(text)` — extract severity and team from the generated string
+  - Accept optional `filed_severity` input from the user to enable over-escalation comparison
   - Handle malformed outputs gracefully: show "parse error" card, do not crash
 - [ ] **7.3** Build result display
   - Severity badge: color-coded (P0=red, P1=orange, P2=yellow, P3=green, P4=gray)
   - Team name display
-  - Escalation warning banner (red banner if `escalation:true`)
+  - Over-escalation banner: shown when `filed_severity < model_predicted_severity` (red warning)
+  - Under-escalation banner: shown when `filed_severity > model_predicted_severity` (yellow warning)
   - Softmax probabilities as a horizontal bar chart using `st.bar_chart`
 - [ ] **7.4** Build feedback panel
   - Thumbs up / thumbs down buttons
-  - If thumbs down: show correction dropdowns for severity, team, escalation
-  - On submit: append `{timestamp, input, model_output, correction}` to `feedback/feedback_log.csv`
+  - If thumbs down: show correction dropdowns for severity and team
+  - On submit: append `{timestamp, input, filed_severity, model_output, correction}` to `feedback/feedback_log.csv`
   - This CSV feeds future RM retraining
 - [ ] **7.5** Build history sidebar
   - Store last 10 triage decisions in `st.session_state`
@@ -433,10 +430,10 @@ Tasks are grouped by phase. Work through them in order — each phase depends on
 |---|---|
 | Severity macro-F1 | > 0.72 |
 | Team routing accuracy | > 0.78 |
-| Escalation precision | > 0.80 |
-| Escalation recall | > 0.70 |
-| **Escalation F1** | **> 0.75** (headline metric) |
-| PPO reward improvement over SFT | > 15% |
+| **PPO reward improvement over SFT** | **> 15%** (headline metric) |
+
+Over-escalation detection accuracy is evaluated at inference time separately
+(filed severity vs predicted severity comparison — no training metric needed).
 
 ---
 
@@ -445,10 +442,9 @@ Tasks are grouped by phase. Work through them in order — each phase depends on
 | Symptom | Likely Cause | Fix |
 |---|---|---|
 | KL divergence explodes | LR too high or beta too low | Reduce LR to 5e-6; increase KL beta to 0.2 |
-| `escalation:true` on >60% outputs | Reward hacking (+2.0 signal dominated) | Increase false positive penalty to -2.0 |
 | Policy collapse (all outputs identical) | Entropy too low | Increase entropy bonus from 0.01 to 0.05 |
 | RM scores everything near 0 | RM overfit | Retrain RM with 2x more hard negatives |
-| Escalation recall < 0.60 | Focal loss insufficient | Increase gamma from 2.0 to 3.0; increase oversample ratio |
+| Severity macro-F1 plateaus below 0.65 | P0/P1 class imbalance | Increase class weight for P0/P1 in reward signal |
 
 ---
 
