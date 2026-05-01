@@ -196,7 +196,7 @@ def build_training_args(cfg: dict) -> TrainingArguments:
         run_name                    = cfg.get("run_name", "sft-llama-3.2-1b"),
         dataloader_num_workers      = cfg.get("dataloader_num_workers", 4),
         dataloader_pin_memory       = cfg.get("dataloader_pin_memory", True),
-        remove_unused_columns       = False,
+        remove_unused_columns       = True,
     )
 
 
