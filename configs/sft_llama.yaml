@@ -63,3 +63,9 @@ run_name: "sft-llama-3.2-1b"        # override per run if doing sweeps
 # ── DataLoader ────────────────────────────────────────────────────────────────
 dataloader_num_workers: 4            # prevents CPU bottleneck on BigRed200
 dataloader_pin_memory: true
+
+
+
+logging_steps: 10
+log_level: "info"
+disable_tqdm: false
