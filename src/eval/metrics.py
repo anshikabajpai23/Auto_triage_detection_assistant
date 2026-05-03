@@ -41,7 +41,7 @@ from sklearn.metrics import (
 # ── constants ─────────────────────────────────────────────────────────────────
 PRIORITY_LABELS = ["P0", "P1", "P2", "P3", "P4"]
 TEAM_LABELS     = ["platform", "database", "frontend", "backend",
-                   "infra", "security", "mobile"]
+                   "infra", "security", "mobile","unknown"]  # 'unknown' for unparseable team predictions
 
 # ── output parser ─────────────────────────────────────────────────────────────
 
@@ -300,6 +300,7 @@ def run_eval_on_checkpoint(checkpoint_dir: str, split: str = "val"):
                 max_new_tokens  = 20,
                 do_sample       = False,
                 pad_token_id    = tokenizer.eos_token_id,
+                eos_token_id    = tokenizer.eos_token_id,
             )
             # Decode only the newly generated tokens
             generated = output[0][inputs["input_ids"].shape[1]:]

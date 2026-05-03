@@ -49,9 +49,9 @@ PROMPT_TEMPLATE = """\
 ### Incident report:
 {title}
 {body}
-### Triage:
+### Triage (always output severity P0-P4 and one team only):
 """
-COMPLETION_TEMPLATE = "severity:{priority} | team:{team}"
+COMPLETION_TEMPLATE = "severity:{priority} | team:{team}\n"
 
 
 # ── config loading ────────────────────────────────────────────────────────────

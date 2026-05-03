@@ -34,5 +34,62 @@ Are answers too templated?
  - no, standard formatting
 
 
- Class Imbalance?
+Class Imbalance?
   - Yes, severe
+
+Eval has blanks for both team and severity prediction.
+Team - 5000/15500
+Severity - 2500/15500
+severity:P3 | team:unknown-platforms | team:unknown-platforms | team:unknown-platform
+severity:P2 | team:unknown | issue:unreachable | steps to reproduce: [none]
+In severity we are getting junk values in the output, where the model is not even predicting what kind of severity it is. It just repeats fragments of input. Why????
+
+Assumptions:
+P0 to P3/P4 - not enough info in title/body
+Filed by - P0 to P4 - They are generally P4, that's why model classified it as P4 even though it was P0
+
+** We can use other dataset as eval and using as out of domain eval, maybe rlhf**
+
+
+check prompt mismatch?
+ - No
+
+Step 5: Compare base vs SFT on same examples?
+format error
+wrong class
+hallucination
+too generic
+missed instruction
+partial answer
+refusal issue
+repetition
+
+Step 6: Check if SFT only learned format?
+Is SFT output more structured than base?
+ - Yes
+Is the actual answer better?
+Does it copy training style?
+ - Yes
+Does it still miss reasoning?
+
+
+
+Train loss high, eval loss high
+→ underfitting
+
+Train loss low, eval loss high
+→ overfitting
+
+Train loss decreasing smoothly
+→ training probably ran
+
+Loss weird / NaN / flat
+→ training bug
+
+Run SFT inference on training as well. Same number of samples as eval
+
+Reevaluate base VS SFT
+- Shuld we add few shot prompting or optimize the prompt
+
+What other metrics should we see?
+
