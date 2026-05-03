@@ -61,6 +61,7 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
+
 # ── dataset ───────────────────────────────────────────────────────────────────
 
 def load_splits(processed_dir: str) -> DatasetDict:
@@ -200,9 +201,33 @@ def build_training_args(cfg: dict) -> TrainingArguments:
     )
 
 
+#----- Save Training examples ----
+def save_training_samples(dataset, output_dir: str, n: int = 100):
+    import csv
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, "sample_training_inputs.csv")
+    rows = dataset["train"].select(range(min(n, len(dataset["train"]))))
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["input_prompt", "expected_output", "full_string"])
+        writer.writeheader()
+        for row in rows:
+            body       = row["body"].strip() if row["body"] else ""
+            prompt     = PROMPT_TEMPLATE.format(title=row["title"].strip(),
+                                                body=("\n" + body) if body else "")
+            completion = COMPLETION_TEMPLATE.format(priority=row["priority"], team=row["team"])
+            writer.writerow({
+                "input_prompt"   : prompt,
+                "expected_output": completion,
+                "full_string"    : prompt + completion,
+            })
+    print(f"Saved {n} training samples to {path}")
+
+
 def train(cfg: dict):
     # Load data
     dataset = load_splits(PROCESSED_DIR)
+    save_training_samples(dataset, cfg.get("output_dir", "checkpoints/sft"))  # ← add this
+
 
     # Load model + tokeniser
     model, tokenizer = load_model_and_tokenizer(cfg)

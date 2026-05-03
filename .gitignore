@@ -102,3 +102,6 @@ wandb/
 *.swp
 *.swo
 feedback/.gitkeep
+
+*.sh
+*.csv

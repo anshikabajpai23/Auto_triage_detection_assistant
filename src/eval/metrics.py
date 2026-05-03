@@ -305,6 +305,25 @@ def run_eval_on_checkpoint(checkpoint_dir: str, split: str = "val"):
             generated = output[0][inputs["input_ids"].shape[1]:]
             predictions.append(tokenizer.decode(generated, skip_special_tokens=True))
 
+        # ── save all predictions ──────────────────────────────────────────────────
+    os.makedirs(os.path.join(ROOT, "results"), exist_ok=True)
+    pred_sev, pred_team = parse_outputs_batch(predictions)
+    results_df = df[["title", "body", "priority", "team"]].copy()
+    results_df["input_prompt"]    = [
+        PROMPT_TEMPLATE.format(
+            title=row["title"].strip(),
+            body=("\n" + row["body"].strip()) if row["body"] else "",
+        )
+        for _, row in df.iterrows()
+    ]
+    results_df["raw_output"]      = predictions
+    results_df["pred_severity"]   = pred_sev
+    results_df["pred_team"]       = pred_team
+    results_df["sev_correct"]     = results_df["priority"] == results_df["pred_severity"]
+    results_df["team_correct"]    = results_df["team"]     == results_df["pred_team"]
+    results_df.to_csv(os.path.join(ROOT, f"results/eval_{split}_predictions.csv"), index=False)
+    print(f"Saved all predictions to results/eval_{split}_predictions.csv")
+
     # ── metrics ───────────────────────────────────────────────────────────────
     results = evaluate_dataframe(df, predictions, verbose=True)
     return results
