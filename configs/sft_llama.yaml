@@ -25,7 +25,7 @@ lora_target_modules:                  # attention projections only
 lora_bias: "none"
 
 # ── Training hyperparameters ──────────────────────────────────────────────────
-num_train_epochs: 3
+num_train_epochs: 5
 per_device_train_batch_size: 8
 per_device_eval_batch_size: 8
 gradient_accumulation_steps: 4       # effective batch = 8 * 4 = 32
@@ -48,7 +48,7 @@ gradient_checkpointing_kwargs:
   use_reentrant: false               # required with PEFT + gradient checkpointing
 
 # ── Logging & saving ──────────────────────────────────────────────────────────
-output_dir: "checkpoints/sft"
+output_dir: "checkpoints/sft_weighted"
 logging_steps: 10
 eval_strategy: "epoch"
 save_strategy: "epoch"

@@ -281,7 +281,13 @@ def run_eval_on_checkpoint(checkpoint_dir: str, split: str = "val"):
     model.eval()
 
     # ── inference ─────────────────────────────────────────────────────────────
-    PROMPT_TEMPLATE = "### Incident report:\n{title}\n{body}\n### Triage:\n"
+    # PROMPT_TEMPLATE = "### Incident report:\n{title}\n{body}\n### Triage:\n"
+    PROMPT_TEMPLATE = """\
+    ### Incident report:
+    {title}
+    {body}
+    ### Triage (always output severity P0-P4 and one team only):
+    """
     predictions = []
 
     with torch.inference_mode():

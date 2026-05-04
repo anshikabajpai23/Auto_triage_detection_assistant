@@ -62,7 +62,7 @@ PROMPT_TEMPLATE = """\
 ### Triage (always output severity P0-P4 and one team only):
 """
 
-COMPLETION_TEMPLATE = "severity:{priority} | team:{team}"
+COMPLETION_TEMPLATE = "severity:{priority} | team:{team}\n"
 
 
 def build_few_shot_prefix() -> str:
