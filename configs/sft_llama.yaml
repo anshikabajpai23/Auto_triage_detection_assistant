@@ -48,7 +48,7 @@ gradient_checkpointing_kwargs:
   use_reentrant: false               # required with PEFT + gradient checkpointing
 
 # ── Logging & saving ──────────────────────────────────────────────────────────
-output_dir: "checkpoints/sft_weighted"
+output_dir: "checkpoints/sft_weighted_parse"
 logging_steps: 10
 eval_strategy: "epoch"
 save_strategy: "epoch"

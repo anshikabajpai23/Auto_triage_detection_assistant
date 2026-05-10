@@ -38,6 +38,7 @@ from transformers import (
     TrainingArguments,
 )
 from trl import SFTTrainer
+from trl import DataCollatorForCompletionOnlyLM
 from torch.nn import CrossEntropyLoss
 
 # ── class weights ─────────────────────────────────────────────────────────────
@@ -283,6 +284,10 @@ def train(cfg: dict):
 
     # Build training args
     training_args = build_training_args(cfg)
+    collator = DataCollatorForCompletionOnlyLM(
+        response_template="### Triage (always output severity P0-P4 and one team only):\n",
+        tokenizer=tokenizer,
+    )
 
     # get token IDs for P0-P4
     severity_token_ids = {}
@@ -301,6 +306,7 @@ def train(cfg: dict):
         max_seq_length       = cfg.get("max_seq_length", 512),
         packing              = cfg.get("packing", False),
         args                 = training_args,
+        data_collator      = collator,
         severity_token_ids   = severity_token_ids,
     )
 
