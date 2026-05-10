@@ -105,3 +105,4 @@ feedback/.gitkeep
 
 *.sh
 *.csv
+*.err
