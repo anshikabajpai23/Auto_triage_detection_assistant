@@ -37,7 +37,7 @@ max_grad_norm: 1.0
 optim: "paged_adamw_32bit"           # paged optimizer — prevents OOM on A100
 
 # ── Sequence ──────────────────────────────────────────────────────────────────
-max_seq_length: 512
+max_seq_length: 1024
 packing: false                       # set true to pack short sequences; off for simplicity
 
 # ── A100-specific flags ───────────────────────────────────────────────────────

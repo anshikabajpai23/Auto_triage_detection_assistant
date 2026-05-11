@@ -128,7 +128,7 @@ def load_splits(processed_dir: str) -> DatasetDict:
     return DatasetDict(splits)
 
 
-def make_formatting_func(tokenizer):
+def make_formatting_func(tokenizer, max_seq_length: int = 1024):
     """
     Returns a function that formats a batch of rows into full training strings.
     SFTTrainer calls this on each batch — no pre-tokenisation needed.
@@ -139,6 +139,18 @@ def make_formatting_func(tokenizer):
             batch["title"], batch["body"], batch["priority"], batch["team"]
         ):
             body = body.strip() if body else ""
+            # truncate first
+            TEMPLATE_OVERHEAD = 40
+            COMPLETION_OVERHEAD = 12
+            title_tokens = len(tokenizer.encode(title.strip(), add_special_tokens=False))
+            max_body_tokens = max_seq_length - title_tokens - TEMPLATE_OVERHEAD - COMPLETION_OVERHEAD
+
+            if body:
+                body_token_ids = tokenizer.encode(body, add_special_tokens=False)
+                if len(body_token_ids) > max_body_tokens:
+                    body_token_ids = body_token_ids[:max_body_tokens]
+                    body = tokenizer.decode(body_token_ids, skip_special_tokens=True)
+            # then build prompt with truncated body
             prompt = PROMPT_TEMPLATE.format(
                 title=title.strip(),
                 body=("\n" + body) if body else "",
@@ -273,6 +285,7 @@ def save_training_samples(dataset, output_dir: str, n: int = 100):
 def train(cfg: dict):
     # Load data
     dataset = load_splits(PROCESSED_DIR)
+    
     output_dir = cfg.get("output_dir", "checkpoints/sft_weighted")
     existing   = [d for d in os.listdir(output_dir) if d.startswith("checkpoint-")] if os.path.exists(output_dir) else []
     print(f"Output dir: {output_dir} | Existing checkpoints: {existing if existing else 'none — fresh start'}")
@@ -281,29 +294,47 @@ def train(cfg: dict):
 
     # Load model + tokeniser
     model, tokenizer = load_model_and_tokenizer(cfg)
-
+    fmt = make_formatting_func(tokenizer, max_seq_length=cfg.get("max_seq_length", 1024))
+    samples = fmt({k: dataset["train"][k][:3] for k in ["title", "body", "priority", "team"]})
+    for i, s in enumerate(samples[:3]):
+        print(f"\n{'='*60}\nSAMPLE {i}:\n{s}\n{'='*60}")
     # Build training args
     training_args = build_training_args(cfg)
     collator = DataCollatorForCompletionOnlyLM(
         response_template="### Triage (always output severity P0-P4 and one team only):\n",
         tokenizer=tokenizer,
     )
-
+    # Verify collator finds the response template and produces non-(-100) labels
+    fmt_fn = make_formatting_func(tokenizer, max_seq_length=cfg.get("max_seq_length", 1024))
+    sample_str = fmt_fn({k: [dataset["train"][k][0]] for k in ["title", "body", "priority", "team"]})[0]
+    enc = tokenizer(sample_str, return_tensors="pt")
+    batch = collator([{"input_ids": enc["input_ids"][0].tolist(),
+                    "attention_mask": enc["attention_mask"][0].tolist()}])
+    n_completion_tokens = (batch["labels"] != -100).sum().item()
+    print(f"Completion tokens visible to loss: {n_completion_tokens}")
+    if n_completion_tokens == 0:
+        raise ValueError("DataCollatorForCompletionOnlyLM found 0 completion tokens. "
+                        "The response_template string doesn't match what the tokenizer produces in context. "
+                        "Training will produce zero loss and learn nothing.")
     # get token IDs for P0-P4
     severity_token_ids = {}
     for label, weight in SEVERITY_TOKEN_WEIGHTS.items():
         ids = tokenizer.encode(label, add_special_tokens=False)
-        if ids:
-            severity_token_ids[ids[0]] = weight
-            print(f"  {label} → token_id={ids[0]}, weight={weight}")
-
+        if len(ids) >=2:
+            digit_token_id = ids[-1]
+            severity_token_ids[digit_token_id] = weight
+            print(f"  {label} → digit token_id={digit_token_id} ('{tokenizer.decode([digit_token_id])}'), weight={weight}")
+            decoded_digit = tokenizer.decode([ids[-1]])
+            expected_digit = label[-1]  # '0', '1', '2', etc.
+            if decoded_digit.strip() != expected_digit:
+                print(f"  WARNING: {label} digit should be '{expected_digit}' but token {ids[-1]} decodes as '{decoded_digit.strip()}' — mismatch!")
     trainer = WeightedSFTTrainer(
         model                = model,
         tokenizer            = tokenizer,
         train_dataset        = dataset["train"],
         eval_dataset         = dataset["val"],
-        formatting_func      = make_formatting_func(tokenizer),
-        max_seq_length       = cfg.get("max_seq_length", 512),
+        formatting_func      = make_formatting_func(tokenizer, max_seq_length=cfg.get("max_seq_length", 1024)),
+        max_seq_length       = cfg.get("max_seq_length", 1024),
         packing              = cfg.get("packing", False),
         args                 = training_args,
         data_collator      = collator,

@@ -300,13 +300,13 @@ def run_eval_on_checkpoint(checkpoint_dir: str, split: str = "val"):
             inputs = tokenizer(
                 prompt, return_tensors="pt", truncation=True, max_length=480
             ).to(model.device)
-
+            newline_token_id = tokenizer.encode("\n", add_special_tokens=False)[-1]
             output = model.generate(
                 **inputs,
                 max_new_tokens  = 20,
                 do_sample       = False,
                 pad_token_id    = tokenizer.eos_token_id,
-                eos_token_id    = tokenizer.eos_token_id,
+                eos_token_id    = [tokenizer.eos_token_id, newline_token_id],
             )
             # Decode only the newly generated tokens
             generated = output[0][inputs["input_ids"].shape[1]:]
