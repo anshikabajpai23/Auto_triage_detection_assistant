@@ -23,6 +23,8 @@ Usage — imported in trainer for per-epoch eval:
     from src.eval.metrics import evaluate_dataframe
     results = evaluate_dataframe(df, predictions)
 """
+import warnings
+warnings.filterwarnings("ignore")
 
 import argparse
 import os
@@ -53,6 +55,12 @@ _OUTPUT_RE = re.compile(
     re.IGNORECASE,
 )
 
+PROMPT_TEMPLATE = """\
+### Incident report:
+{title}
+{body}
+### Triage (always output severity P0-P4 and one team only):
+"""
 
 def parse_output(text: str) -> tuple[Optional[str], Optional[str]]:
     """
@@ -282,36 +290,43 @@ def run_eval_on_checkpoint(checkpoint_dir: str, split: str = "val"):
 
     # ── inference ─────────────────────────────────────────────────────────────
     # PROMPT_TEMPLATE = "### Incident report:\n{title}\n{body}\n### Triage:\n"
-    PROMPT_TEMPLATE = """\
-    ### Incident report:
-    {title}
-    {body}
-    ### Triage (always output severity P0-P4 and one team only):
-    """
+    newline_token_id = tokenizer.encode("\n", add_special_tokens=False)[-1]
     predictions = []
 
     with torch.inference_mode():
-        for _, row in tqdm(df.iterrows(), total=len(df), desc="Inference"):
+        for i, (_, row) in enumerate(tqdm(df.iterrows(), total=len(df), desc="Inference")):
             body   = row["body"].strip() if row["body"] else ""
             prompt = PROMPT_TEMPLATE.format(
                 title=row["title"].strip(),
                 body=("\n" + body) if body else "",
             )
             inputs = tokenizer(
-                prompt, return_tensors="pt", truncation=True, max_length=480
+                prompt, return_tensors="pt", truncation=True, max_length=1024
             ).to(model.device)
-            newline_token_id = tokenizer.encode("\n", add_special_tokens=False)[-1]
             output = model.generate(
                 **inputs,
                 max_new_tokens  = 20,
                 do_sample       = False,
+                repetition_penalty=1.1,
+                no_repeat_ngram_size=3,
                 pad_token_id    = tokenizer.eos_token_id,
-                eos_token_id    = [tokenizer.eos_token_id, newline_token_id],
+                eos_token_id    = tokenizer.eos_token_id
             )
             # Decode only the newly generated tokens
             generated = output[0][inputs["input_ids"].shape[1]:]
-            predictions.append(tokenizer.decode(generated, skip_special_tokens=True))
+            raw_pred = tokenizer.decode(generated, skip_special_tokens=True)
 
+            sev, team = parse_output(raw_pred)
+
+            if sev is not None and team is not None:
+                pred = f"severity:{sev} | team:{team}"
+            else:
+                pred = raw_pred.strip()
+
+            predictions.append(pred)
+            if i < 20:
+                sev, team = parse_output(pred)
+                print(f"[{i}] true=({row['priority']}, {row['team']}) | raw='{pred}' | parsed=({sev}, {team})")
         # ── save all predictions ──────────────────────────────────────────────────
     os.makedirs(os.path.join(ROOT, "results"), exist_ok=True)
     pred_sev, pred_team = parse_outputs_batch(predictions)

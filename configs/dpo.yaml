@@ -1,71 +1,71 @@
-# ── SFT training config for LLaMA 3.2 1B on BigRed200 A100 40GB ──────────────
-# Used by: src/models/sft_trainer.py
-# Run via: scripts/slurm/run_sft.sh
+# ── DPO config for LLaMA 3.2 1B on BigRed200 A100 40GB ───────────────────────
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 model_name: "meta-llama/Llama-3.2-1B"
-# Fallback for local testing without HF_TOKEN (same tokeniser family):
-# model_name: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+sft_checkpoint: "checkpoints/sft_weighted_oversample"   # starting policy
 
 # ── QLoRA / BitsAndBytes ──────────────────────────────────────────────────────
 load_in_4bit: true
-bnb_4bit_quant_type: "nf4"            # NormalFloat4 — best for LLM weights
-bnb_4bit_compute_dtype: "bfloat16"   # bfloat16 on A100 (more stable than fp16)
-bnb_4bit_use_double_quant: true      # saves ~0.4 bits/param extra
+bnb_4bit_quant_type: "nf4"
+bnb_4bit_compute_dtype: "bfloat16"
+bnb_4bit_use_double_quant: true
 
 # ── LoRA ──────────────────────────────────────────────────────────────────────
 lora_r: 16
-lora_alpha: 32                        # effective scale = alpha / r = 2.0
+lora_alpha: 32
 lora_dropout: 0.05
-lora_target_modules:                  # attention projections only
+lora_target_modules:
   - q_proj
   - k_proj
   - v_proj
   - o_proj
 lora_bias: "none"
 
+# ── DPO-specific ──────────────────────────────────────────────────────────────
+beta: 0.1                            # KL penalty — how close to stay to SFT reference
+                                     # lower = more aggressive alignment
+                                     # higher = stay closer to SFT outputs
+
 # ── Training hyperparameters ──────────────────────────────────────────────────
-num_train_epochs: 5
-per_device_train_batch_size: 8
-per_device_eval_batch_size: 8
-gradient_accumulation_steps: 4       # effective batch = 8 * 4 = 32
-learning_rate: 2.0e-4
+num_train_epochs: 2
+per_device_train_batch_size: 4
+per_device_eval_batch_size: 4
+gradient_accumulation_steps: 4       # effective batch = 16
+learning_rate: 5.0e-6                # lower than SFT — DPO is sensitive to LR
 lr_scheduler_type: "cosine"
-warmup_ratio: 0.05                   # 5% of steps used for warmup
+warmup_ratio: 0.05
 weight_decay: 0.01
 max_grad_norm: 1.0
-optim: "paged_adamw_32bit"           # paged optimizer — prevents OOM on A100
+optim: "paged_adamw_32bit"
 
 # ── Sequence ──────────────────────────────────────────────────────────────────
-max_seq_length: 1024
-packing: false                       # set true to pack short sequences; off for simplicity
+max_length: 512
+max_prompt_length: 256               # remaining budget goes to completion
 
 # ── A100-specific flags ───────────────────────────────────────────────────────
-bf16: true                           # always use bf16 on A100 (not fp16)
-tf32: true                           # enable TF32 for matmuls — free speedup on A100
-gradient_checkpointing: true         # saves ~40% VRAM; required to fit in 40GB
+bf16: true
+tf32: true
+gradient_checkpointing: true
 gradient_checkpointing_kwargs:
-  use_reentrant: false               # required with PEFT + gradient checkpointing
+  use_reentrant: false
+
+# ── Preference data ───────────────────────────────────────────────────────────
+train_data: "data/preference_pairs/train.jsonl"
+val_data:   "data/preference_pairs/val.jsonl"
 
 # ── Logging & saving ──────────────────────────────────────────────────────────
-output_dir: "checkpoints/sft_weighted_oversampling"
+output_dir: "checkpoints/dpo"
 logging_steps: 10
 eval_strategy: "epoch"
 save_strategy: "epoch"
-save_total_limit: 3                  # keep only last 3 checkpoints; disk fills fast
+save_total_limit: 2
 load_best_model_at_end: true
 metric_for_best_model: "eval_loss"
 
-# ── W&B experiment tracking ───────────────────────────────────────────────────
+# ── W&B ───────────────────────────────────────────────────────────────────────
 report_to: "wandb"
-run_name: "sft-llama-3.2-1b-oversamp"        # override per run if doing sweeps
+run_name: "dpo-llama-3.2-1b"
 
 # ── DataLoader ────────────────────────────────────────────────────────────────
-dataloader_num_workers: 4            # prevents CPU bottleneck on BigRed200
+dataloader_num_workers: 4
 dataloader_pin_memory: true
-
-
-
-logging_steps: 10
-log_level: "info"
-disable_tqdm: false
