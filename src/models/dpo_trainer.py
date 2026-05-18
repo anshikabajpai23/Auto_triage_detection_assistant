@@ -25,7 +25,7 @@ import os
 import torch
 import yaml
 from datasets import Dataset
-from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training, PeftModel
+from peft import TaskType, prepare_model_for_kbit_training, PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from trl import DPOTrainer, DPOConfig
 
@@ -89,18 +89,8 @@ def load_model_and_tokenizer(cfg: dict):
         use_gradient_checkpointing = cfg.get("gradient_checkpointing", True),
     )
 
-    lora_config = LoraConfig(
-        r              = cfg.get("lora_r", 16),
-        lora_alpha     = cfg.get("lora_alpha", 32),
-        lora_dropout   = cfg.get("lora_dropout", 0.05),
-        target_modules = cfg.get("lora_target_modules", ["q_proj", "v_proj"]),
-        bias           = cfg.get("lora_bias", "none"),
-        task_type      = TaskType.CAUSAL_LM,
-    )
-
     # Load SFT adapters as starting policy — DPOTrainer uses base (no adapter) as ref
     model = PeftModel.from_pretrained(base_model, sft_checkpoint, is_trainable=True)
-    model = get_peft_model(base_model, lora_config)
     model.print_trainable_parameters()
 
     return model, tokenizer
@@ -114,8 +104,8 @@ def build_dpo_config(cfg: dict) -> DPOConfig:
     return DPOConfig(
         output_dir                    = cfg.get("output_dir", "checkpoints/dpo"),
         beta                          = cfg.get("beta", 0.1),
-        max_length                    = cfg.get("max_length", 512),
-        max_prompt_length             = cfg.get("max_prompt_length", 256),
+        max_length                    = cfg.get("max_length", 1024),
+        max_prompt_length             = cfg.get("max_prompt_length", 900),
         num_train_epochs              = cfg.get("num_train_epochs", 2),
         per_device_train_batch_size   = cfg.get("per_device_train_batch_size", 4),
         per_device_eval_batch_size    = cfg.get("per_device_eval_batch_size", 4),
