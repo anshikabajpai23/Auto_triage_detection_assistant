@@ -83,24 +83,31 @@ No training label required. No escalation head in the model. At inference:
 incident-triage/
 ├── CLAUDE.md
 ├── README.md
+├── FIXES.md                        # log of all critical bugs fixed during training
 ├── requirements.txt
 ├── requirements-dev.txt            # macOS local dev (no bitsandbytes)
 ├── data/
 │   ├── raw/                        # downloaded dataset files (gitignored)
 │   │   └── gitbugs.csv             # manually assembled from github.com/av9ash/gitbugs
 │   ├── processed/                  # cleaned, labeled parquet splits (gitignored)
-│   └── preference_pairs/           # reward model training data
+│   └── preference_pairs/           # DPO/RM training data
 ├── configs/
-│   ├── sft_llama.yaml
+│   ├── sft_llama.yaml              # base SFT config
+│   ├── sft_llama_oversampling.yaml # SFT config with oversampling output_dir
+│   ├── dpo.yaml                    # DPO training config
 │   ├── reward_model.yaml
 │   └── ppo.yaml
 ├── src/
 │   ├── data/
 │   │   ├── load_datasets.py        # load Eclipse + GitBugs, concat, stratified split
 │   │   ├── label_engineering.py    # priority normalization, team labels, text cleaning
-│   │   └── format_prompts.py       # wrap samples in instruction template, tokenize
+│   │   ├── format_prompts.py       # wrap samples in instruction template, tokenize
+│   │   └── build_preference_pairs.py  # generate (prompt, chosen, rejected) from predictions
 │   ├── models/
-│   │   ├── sft_trainer.py          # QLoRA SFT training loop
+│   │   ├── sft_trainer.py                      # original QLoRA SFT training loop
+│   │   ├── sft_trainer_weighted_loss.py         # SFT + per-class token weighting
+│   │   ├── sft_trainer_weighted_oversampling.py # SFT + weighting + mild oversampling ← best SFT
+│   │   ├── dpo_trainer.py                       # DPO alignment (replaces RM+PPO)
 │   │   ├── reward_trainer.py       # reward model architecture + TRL RewardTrainer
 │   │   └── ppo_trainer.py          # TRL PPOTrainer setup + rollout loop
 │   └── eval/
@@ -108,7 +115,12 @@ incident-triage/
 │       └── confusion_matrix.py     # severity confusion matrix + off-diagonal analysis
 ├── scripts/
 │   ├── slurm/
-│   │   ├── run_sft.sh
+│   │   ├── run_sft_train.sh
+│   │   ├── run_sft_train_weighted.sh
+│   │   ├── run_sft_train_oversampling.sh
+│   │   ├── run_dpo.sh
+│   │   ├── inference.sh
+│   │   ├── inference_weighted_parse.sh
 │   │   ├── run_reward.sh
 │   │   └── run_ppo.sh
 │   └── merge_lora.py               # merge LoRA adapters into base model for inference
@@ -118,7 +130,7 @@ incident-triage/
 └── notebooks/
     ├── 01_eda.ipynb                # dataset exploration + label distribution
     ├── 02_label_analysis.ipynb     # priority normalization validation, team coverage
-    └── 03_eval_analysis.ipynb      # final metrics, confusion matrices, SFT vs PPO
+    └── 03_eval_analysis.ipynb      # final metrics, confusion matrices, SFT vs DPO
 ```
 
 ---
@@ -196,6 +208,41 @@ Keyword-matched from `component`/`product` fields to 7 buckets:
 `platform`, `database`, `frontend`, `backend`, `infra`, `security`, `mobile`
 
 Rows where team resolves to `unknown` are **dropped before training** — they add noise without a clear label. Spot-check the unknown bucket before each training run to see if additional keywords should be added.
+
+---
+
+## Class Imbalance Handling
+
+### Per-Class Token Weighting
+Applied in `sft_trainer_weighted_loss.py` and `sft_trainer_weighted_oversampling.py`.
+Higher weight = model penalized more for getting that severity digit wrong.
+
+```python
+SEVERITY_TOKEN_WEIGHTS = {
+    "P0": 2.0,   # rarest + most critical
+    "P1": 1.5,   # rare + high severity
+    "P2": 1.2,   # moderately rare
+    "P3": 1.0,   # majority class — baseline
+    "P4": 1.5,   # rare but often confused with P3
+}
+```
+
+Weights applied only to the severity digit token (e.g. `'0'` in `severity:P0`) at completion positions. Prompt tokens are masked to -100 and excluded from loss entirely.
+
+### Mild Oversampling
+Applied in `sft_trainer_weighted_oversampling.py` before training.
+Each minority class is upsampled (with replacement) to reach 30% of the majority class (P3) count.
+
+```
+P3: ~72K  (majority, untouched)
+P0:  ~2.5K → ~21.6K  (+19K synthetic copies)
+P1:  ~9K   → ~21.6K  (+12K synthetic copies)
+P4:  ~6K   → ~21.6K  (+15K synthetic copies)
+P2: no oversampling needed (already above target)
+Total: ~124K → ~140K rows after oversampling
+```
+
+Target ratio is configurable via `OVERSAMPLE_TARGET_RATIO = 0.30` at the top of the file.
 
 ---
 
@@ -326,9 +373,20 @@ Tasks are grouped by phase. Work through them in order — each phase depends on
   - Returns `(None, None)` for malformed output — never crashes
   - `compute_metrics()`: severity macro-F1, severity accuracy, team accuracy, per-class F1, confusion matrix, parse failure rate
   - `run_eval_on_checkpoint()`: full PeftModel inference loop for standalone eval
-- [ ] **2.5** Run SFT evaluation on the validation set after training on BigRed200
-  - Log per-head metrics to W&B
-  - Target: severity macro-F1 > 0.72, team accuracy > 0.78
+- [x] **2.5** Run SFT evaluation on the validation set after training on BigRed200
+  - Logged per-head metrics to W&B
+  - **Best checkpoint: `checkpoints/sft_weighted_oversample`**
+
+  | Run | Parse Fail | Macro-F1 | Sev Acc | Team Acc | P0 F1 | P4 F1 |
+  |---|---|---|---|---|---|---|
+  | Zero-shot baseline | 100% | 0.000 | 0.000 | 0.000 | 0.00 | 0.00 |
+  | Few-shot baseline | 17.1% | 0.5139 | 0.6458 | 0.5124 | 0.38 | 0.17 |
+  | SFT v1 | 18.7% | 0.4468 | 0.5829 | 0.6493 | 0.24 | 0.16 |
+  | Weighted loss | 17.8% | 0.4719 | 0.6157 | 0.6969 | 0.26 | 0.13 |
+  | **Weighted + oversampling** | **12.0%** | **0.5708** | **0.6812** | **0.8178 ✅** | **0.41** | **0.41** |
+
+  - Team accuracy target **met** (0.82 > 0.78) ✅
+  - Severity macro-F1 still below 0.72 — DPO/PPO phase to close this gap
 
 ---
 
@@ -480,11 +538,11 @@ Tasks are grouped by phase. Work through them in order — each phase depends on
 
 ## Key Metrics (Targets)
 
-| Metric | Target |
-|---|---|
-| Severity macro-F1 | > 0.72 |
-| Team routing accuracy | > 0.78 |
-| **PPO reward improvement over SFT** | **> 15%** (headline metric) |
+| Metric | Target | Status |
+|---|---|---|
+| Severity macro-F1 | > 0.72 | 0.5708 — in progress |
+| Team routing accuracy | > 0.78 | **0.8178 ✅ achieved** |
+| Alignment improvement over SFT | > 15% macro-F1 gain | pending DPO/PPO |
 
 Over-escalation detection is evaluated at inference time only — no training metric.
 It is reported in the UI as a comparison between `filed_severity` and `model_predicted_severity`.

@@ -1,0 +1,64 @@
+# ── Reward Model config for LLaMA 3.2 1B on BigRed200 A100 40GB ───────────────
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model_name: "meta-llama/Llama-3.2-1B"
+
+# ── QLoRA / BitsAndBytes ──────────────────────────────────────────────────────
+load_in_4bit: true
+bnb_4bit_quant_type: "nf4"
+bnb_4bit_compute_dtype: "bfloat16"
+bnb_4bit_use_double_quant: true
+
+# ── LoRA ──────────────────────────────────────────────────────────────────────
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+lora_bias: "none"
+
+# ── Training hyperparameters ──────────────────────────────────────────────────
+num_train_epochs: 2
+per_device_train_batch_size: 4
+per_device_eval_batch_size: 4
+gradient_accumulation_steps: 4       # effective batch = 16
+learning_rate: 1.0e-5                # lower than SFT — RM is more sensitive
+lr_scheduler_type: "cosine"
+warmup_ratio: 0.05
+weight_decay: 0.01
+max_grad_norm: 1.0
+optim: "paged_adamw_32bit"
+
+# ── Sequence ──────────────────────────────────────────────────────────────────
+max_length: 512                      # max tokens for prompt + completion
+
+# ── A100-specific flags ───────────────────────────────────────────────────────
+bf16: true
+tf32: true
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+
+# ── Preference data ───────────────────────────────────────────────────────────
+train_data: "data/preference_pairs/train.jsonl"
+val_data:   "data/preference_pairs/val.jsonl"
+
+# ── Logging & saving ──────────────────────────────────────────────────────────
+output_dir: "checkpoints/reward_model"
+logging_steps: 10
+eval_strategy: "epoch"
+save_strategy: "epoch"
+save_total_limit: 2
+load_best_model_at_end: true
+metric_for_best_model: "eval_loss"
+
+# ── W&B ───────────────────────────────────────────────────────────────────────
+report_to: "wandb"
+run_name: "reward-model-llama-3.2-1b"
+
+# ── DataLoader ────────────────────────────────────────────────────────────────
+dataloader_num_workers: 4
+dataloader_pin_memory: true
