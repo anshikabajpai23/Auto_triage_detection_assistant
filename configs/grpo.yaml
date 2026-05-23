@@ -1,0 +1,53 @@
+# ── GRPO config for LLaMA 3.2 1B on BigRed200 A100 40GB ───────────────────────
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model_name: "meta-llama/Llama-3.2-1B"
+sft_checkpoint: "checkpoints/sft_weighted_oversampling/checkpoint-18504"   # starting policy
+
+# ── QLoRA / BitsAndBytes ──────────────────────────────────────────────────────
+load_in_4bit: true
+bnb_4bit_quant_type: "nf4"
+bnb_4bit_compute_dtype: "bfloat16"
+bnb_4bit_use_double_quant: true
+
+# ── GRPO-specific ─────────────────────────────────────────────────────────────
+num_generations: 8               # completions per prompt — more = better signal, more VRAM
+max_prompt_length: 900           # leaves ~124 tokens for completion within 1024 window
+max_completion_length: 20        # "severity:P1 | team:backend\n" ≈ 10 tokens; 20 is safe
+beta: 0.04                       # KL penalty — lower than DPO (0.1) since reward is verifiable
+max_seq_length: 1024             # used for body pre-truncation in dataset builder
+
+# ── Training hyperparameters ──────────────────────────────────────────────────
+num_train_epochs: 2
+per_device_train_batch_size: 8   # 2 prompts × 8 generations = 16 rollouts per step
+per_device_eval_batch_size: 8
+gradient_accumulation_steps: 2   # effective batch = 16 prompts × 8 gen = 128 rollouts
+learning_rate: 5.0e-6            # conservative — GRPO is sensitive to LR
+lr_scheduler_type: "cosine"
+warmup_ratio: 0.05
+weight_decay: 0.01
+max_grad_norm: 1.0
+optim: "paged_adamw_32bit"
+
+# ── A100-specific flags ───────────────────────────────────────────────────────
+bf16: true
+tf32: true
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+
+# ── Logging & saving ──────────────────────────────────────────────────────────
+output_dir: "checkpoints/grpo"
+logging_steps: 10
+eval_strategy: "epoch"
+save_strategy: "epoch"
+save_total_limit: 2
+load_best_model_at_end: false
+
+# ── W&B ───────────────────────────────────────────────────────────────────────
+report_to: "wandb"
+run_name: "grpo-llama-3.2-1b"
+
+# ── DataLoader ────────────────────────────────────────────────────────────────
+dataloader_num_workers: 4
+dataloader_pin_memory: true
