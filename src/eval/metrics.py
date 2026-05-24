@@ -62,6 +62,17 @@ PROMPT_TEMPLATE = """\
 ### Triage (always output severity P0-P4 and one team only):
 """
 
+# ── per-class scaling to correct majority-class bias ──────────────────────────
+# P3 dominates training (58%) → softmax biased toward P3 at inference
+# Scale down P3, scale up minority classes before argmax
+SEVERITY_SCALE = {
+    "P0": 2.0,   # was boosted during training, needs less help
+    "P1": 1.5,
+    "P2": 1.1,
+    "P3": 0.7,   # still majority but less dominant than before
+    "P4": 1.8,
+}
+
 def parse_output(text: str) -> tuple[Optional[str], Optional[str]]:
     """
     Parse a model output string into (severity, team).
@@ -289,44 +300,79 @@ def run_eval_on_checkpoint(checkpoint_dir: str, split: str = "val"):
     model.eval()
 
     # ── inference ─────────────────────────────────────────────────────────────
-    # PROMPT_TEMPLATE = "### Incident report:\n{title}\n{body}\n### Triage:\n"
     newline_token_id = tokenizer.encode("\n", add_special_tokens=False)[-1]
+
+    # build severity digit token map once (outside loop)
+    severity_token_map = {}
+    for label in ["P0", "P1", "P2", "P3", "P4"]:
+        ids = tokenizer.encode(label, add_special_tokens=False)
+        severity_token_map[label] = ids[-1]   # digit token: '0'→15, '1'→16, etc.
+    digit_token_ids = set(severity_token_map.values())
+    print(f"Severity token map: { {k: v for k, v in severity_token_map.items()} }")
+
     predictions = []
 
     with torch.inference_mode():
         for i, (_, row) in enumerate(tqdm(df.iterrows(), total=len(df), desc="Inference")):
-            body   = row["body"].strip() if row["body"] else ""
+            body  = row["body"].strip() if row["body"] else ""
+            title = row["title"].strip()
+
+            # truncate body first — keep title + template intact
+            TEMPLATE_OVERHEAD = 40
+            title_tokens    = len(tokenizer.encode(title, add_special_tokens=False))
+            max_body_tokens = 1024 - title_tokens - TEMPLATE_OVERHEAD
+            if body and max_body_tokens > 0:
+                body_ids = tokenizer.encode(body, add_special_tokens=False)
+                if len(body_ids) > max_body_tokens:
+                    body = tokenizer.decode(body_ids[:max_body_tokens], skip_special_tokens=True)
+
             prompt = PROMPT_TEMPLATE.format(
-                title=row["title"].strip(),
+                title=title,
                 body=("\n" + body) if body else "",
             )
-            inputs = tokenizer(
-                prompt, return_tensors="pt", truncation=True, max_length=1024
-            ).to(model.device)
+            inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+
             output = model.generate(
                 **inputs,
-                max_new_tokens  = 20,
-                do_sample       = False,
-                repetition_penalty=1.1,
-                no_repeat_ngram_size=3,
-                pad_token_id    = tokenizer.eos_token_id,
-                eos_token_id    = tokenizer.eos_token_id
+                max_new_tokens          = 20,
+                do_sample               = False,
+                temperature             = None,
+                top_p                   = None,
+                pad_token_id            = tokenizer.eos_token_id,
+                eos_token_id            = [tokenizer.eos_token_id, newline_token_id],
+                output_scores           = True,
+                return_dict_in_generate = True,
             )
-            # Decode only the newly generated tokens
-            generated = output[0][inputs["input_ids"].shape[1]:]
-            raw_pred = tokenizer.decode(generated, skip_special_tokens=True)
 
-            sev, team = parse_output(raw_pred)
+            generated_ids = output.sequences[0][inputs["input_ids"].shape[1]:]
+            scores_list   = output.scores   # one (1, vocab_size) tensor per step
 
-            if sev is not None and team is not None:
-                pred = f"severity:{sev} | team:{team}"
-            else:
-                pred = raw_pred.strip()
+            # decode raw output
+            pred = tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+            # find which generation step produced the severity digit
+            severity_step = None
+            for step, tid in enumerate(generated_ids.tolist()):
+                if tid in digit_token_ids:
+                    severity_step = step
+                    break
+
+            # apply per-class scaling at that step to correct majority-class bias
+            if severity_step is not None:
+                step_logits = scores_list[severity_step].squeeze(0)   # (vocab_size,)
+                scaled = {
+                    label: step_logits[tid].item() * SEVERITY_SCALE[label]
+                    for label, tid in severity_token_map.items()
+                }
+                best_sev = max(scaled, key=scaled.get)
+                original_sev, team = parse_output(pred)
+                if team is not None and original_sev != best_sev:
+                    pred = f"severity:{best_sev} | team:{team}"
 
             predictions.append(pred)
             if i < 20:
                 sev, team = parse_output(pred)
-                print(f"[{i}] true=({row['priority']}, {row['team']}) | raw='{pred}' | parsed=({sev}, {team})")
+                print(f"[{i}] true=({row['priority']}, {row['team']}) | raw='{pred}' | parsed=({sev}, {team})", flush=True)
         # ── save all predictions ──────────────────────────────────────────────────
     os.makedirs(os.path.join(ROOT, "results"), exist_ok=True)
     pred_sev, pred_team = parse_outputs_batch(predictions)
