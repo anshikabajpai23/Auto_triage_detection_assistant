@@ -383,13 +383,25 @@ Tasks are grouped by phase. Work through them in order — each phase depends on
   | Few-shot baseline | 17.1% | 0.5139 | 0.6458 | 0.5124 | 0.38 | 0.17 | |
   | SFT v1 | 18.7% | 0.4468 | 0.5829 | 0.6493 | 0.24 | 0.16 | |
   | Weighted loss | 17.8% | 0.4719 | 0.6157 | 0.6969 | 0.26 | 0.13 | |
-  | **Weighted + oversampling** | **12.0%** | **0.5708** | **0.6812** | **0.8178 ✅** | **0.41** | **0.41** | best SFT |
+  | **Weighted + oversampling** | **12.0%** | **0.5708** | **0.6812** | **0.8178 ✅** | **0.41** | **0.41** | best SFT checkpoint |
   | Manual threshold (P0=2.0, P3=0.7, P4=1.8) | **0.0%** | 0.2615 | 0.2611 | 0.9380 | 0.37 | 0.38 | parse fail eliminated but macro-F1 collapsed — P3 F1=0, scales too aggressive |
+  | **Bayes log-prior correction** | **0.0%** | **0.6656 ↑** | **0.7668** | **0.9380 ✅** | **0.4486** | **0.8422 ↑** | best overall — no extra training, inference-only fix |
 
-  - Team accuracy target **met** (0.82 > 0.78) ✅
-  - Severity macro-F1 still below 0.72 — DPO/PPO phase to close this gap
-  - Manual threshold: parse failure dropped to 0% (all outputs parseable) but severity accuracy collapsed — P3 never predicted, P4 absorbed uncertain predictions
-  - Next inference attempt: Bayes-optimal prior correction (`logit_i - log(prior_i)`) using val set frequencies
+  Per-class F1 for log-prior run (val set, checkpoint-18504):
+  | Class | F1 | Notes |
+  |---|---|---|
+  | P0 | 0.4486 | ↑ from 0.41 — rare class, still hardest |
+  | P1 | 0.5315 | moderate improvement |
+  | P2 | 0.6641 | solid |
+  | P3 | 0.8418 | majority class, expected high |
+  | P4 | **0.8422** | ↑ from 0.41 — huge gain from prior correction |
+
+  - Team accuracy target **met** (0.9380 > 0.78) ✅ — log-prior correction also improved team accuracy (no more parse failures)
+  - Severity macro-F1: **0.6656** (target 0.72, gap = 0.054) — DPO to close this
+  - Manual threshold: catastrophic — P3 F1 collapsed to 0 (too aggressive, vacuumed predictions into P4)
+  - Bayes log-prior correction (Menon et al. 2013): `logit_i - log(prior_i)` at inference time using **train set** priors (no data leakage)
+  - Priors: P0=0.0385, P1=0.0746, P2=0.1785, P3=0.5141, P4=0.1944 (computed from 123,836 train rows)
+  - Next: run DPO (`sbatch scripts/slurm/run_dpo.sh`) — expect 0.05–0.10 macro-F1 lift from preference alignment
 
 ---
 
@@ -543,9 +555,9 @@ Tasks are grouped by phase. Work through them in order — each phase depends on
 
 | Metric | Target | Status |
 |---|---|---|
-| Severity macro-F1 | > 0.72 | 0.5708 — in progress |
-| Team routing accuracy | > 0.78 | **0.8178 ✅ achieved** |
-| Alignment improvement over SFT | > 15% macro-F1 gain | pending DPO/PPO |
+| Severity macro-F1 | > 0.72 | **0.6656** (Bayes log-prior, val) — DPO to close gap |
+| Team routing accuracy | > 0.78 | **0.9380 ✅ achieved** |
+| Alignment improvement over SFT | > 15% macro-F1 gain | pending DPO (target: 0.6656 → 0.72+) |
 
 Over-escalation detection is evaluated at inference time only — no training metric.
 It is reported in the UI as a comparison between `filed_severity` and `model_predicted_severity`.

@@ -62,15 +62,19 @@ PROMPT_TEMPLATE = """\
 ### Triage (always output severity P0-P4 and one team only):
 """
 
-# ── per-class scaling to correct majority-class bias ──────────────────────────
-# P3 dominates training (58%) → softmax biased toward P3 at inference
-# Scale down P3, scale up minority classes before argmax
-SEVERITY_SCALE = {
-    "P0": 2.0,   # was boosted during training, needs less help
-    "P1": 1.5,
-    "P2": 1.1,
-    "P3": 0.7,   # still majority but less dominant than before
-    "P4": 1.8,
+# ── Bayes-optimal prior correction (Menon et al. 2013) ───────────────────────
+# Corrects majority-class bias by subtracting log(prior) from each class logit.
+# Theoretically optimal decision rule for imbalanced classification:
+#   predict class i = argmax_i [ logit_i - log(prior_i) ]
+# Priors = val set class frequencies (original, un-oversampled distribution).
+import math
+# Priors from TRAIN set (stratified split — no data leakage)
+LOG_PRIORS = {
+    "P0": math.log(0.0385),   # 4,768  / 123,836
+    "P1": math.log(0.0746),   # 9,238  / 123,836
+    "P2": math.log(0.1785),   # 22,099 / 123,836
+    "P3": math.log(0.5141),   # 63,662 / 123,836
+    "P4": math.log(0.1944),   # 24,069 / 123,836
 }
 
 def parse_output(text: str) -> tuple[Optional[str], Optional[str]]:
@@ -357,14 +361,15 @@ def run_eval_on_checkpoint(checkpoint_dir: str, split: str = "val"):
                     severity_step = step
                     break
 
-            # apply per-class scaling at that step to correct majority-class bias
+            # Bayes-optimal prior correction: logit_i - log(prior_i)
+            # Higher correction for rare classes (log(0.03) << log(0.63))
             if severity_step is not None:
                 step_logits = scores_list[severity_step].squeeze(0)   # (vocab_size,)
-                scaled = {
-                    label: step_logits[tid].item() * SEVERITY_SCALE[label]
+                corrected = {
+                    label: step_logits[tid].item() - LOG_PRIORS[label]
                     for label, tid in severity_token_map.items()
                 }
-                best_sev = max(scaled, key=scaled.get)
+                best_sev = max(corrected, key=corrected.get)
                 original_sev, team = parse_output(pred)
                 if team is not None and original_sev != best_sev:
                     pred = f"severity:{best_sev} | team:{team}"
