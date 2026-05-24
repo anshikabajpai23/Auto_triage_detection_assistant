@@ -403,6 +403,22 @@ Tasks are grouped by phase. Work through them in order — each phase depends on
   - Priors: P0=0.0385, P1=0.0746, P2=0.1785, P3=0.5141, P4=0.1944 (computed from 123,836 train rows)
   - Next: run DPO (`sbatch scripts/slurm/run_dpo.sh`) — expect 0.05–0.10 macro-F1 lift from preference alignment
 
+  Per-team F1 (val set, checkpoint-18504, log-prior correction):
+  | Team | F1 | Notes |
+  |---|---|---|
+  | platform | 0.9241 | strong |
+  | database | 0.9682 | strong — despite being rare (2,460 train samples) |
+  | frontend | 0.9550 | strong |
+  | backend | 0.8391 | lowest but still well above target |
+  | infra | 0.9733 | strong |
+  | security | 0.9738 | strong — despite being very rare (1,629 train samples) |
+  | mobile | 0.9749 | strong — despite being rarest (772 train samples) |
+  | **macro** | **0.9441** | all teams well-balanced, no imbalance fix needed |
+
+  - **Team class imbalance is NOT a problem** — even the rarest teams (mobile=772, security=1,629) achieve F1 > 0.97
+  - Team routing is solved. All remaining effort goes to severity (P0 F1=0.45, P1 F1=0.53 are the weak points)
+  - No team-side fixes needed: no team oversampling, no team token weights, no team log-prior correction
+
 ---
 
 ### Phase 3: Reward Model

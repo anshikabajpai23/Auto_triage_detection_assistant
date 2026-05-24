@@ -173,14 +173,26 @@ def compute_metrics(
     cm = confusion_matrix(true_severities, pred_sev_clean, labels=PRIORITY_LABELS)
 
     # ── team metrics ──────────────────────────────────────────────────────────
-    team_accuracy = accuracy_score(true_teams, pred_team_clean)
+    team_labels_known = [t for t in TEAM_LABELS if t != "unknown"]
+    team_accuracy  = accuracy_score(true_teams, pred_team_clean)
+    team_macro_f1  = f1_score(
+        true_teams, pred_team_clean,
+        labels=team_labels_known, average="macro", zero_division=0,
+    )
+    per_team_f1_arr  = f1_score(
+        true_teams, pred_team_clean,
+        labels=team_labels_known, average=None, zero_division=0,
+    )
+    per_team_f1_dict = dict(zip(team_labels_known, per_team_f1_arr.tolist()))
 
     results = {
         "severity_macro_f1"  : round(severity_macro_f1, 4),
         "severity_accuracy"  : round(severity_accuracy, 4),
+        "team_macro_f1"      : round(team_macro_f1, 4),
         "team_accuracy"      : round(team_accuracy, 4),
         "parse_failure_rate" : round(parse_failure_rate, 4),
         "per_class_f1"       : {k: round(v, 4) for k, v in per_class_f1_dict.items()},
+        "per_team_f1"        : {k: round(v, 4) for k, v in per_team_f1_dict.items()},
         "confusion_matrix"   : cm.tolist(),
         "n_samples"          : n,
     }
@@ -202,7 +214,13 @@ def _print_results(results: dict, true_sev: list, pred_sev: list):
     print(f"  Severity macro-F1  : {results['severity_macro_f1']:.4f}  (target > 0.72)")
     print(f"  Severity accuracy  : {results['severity_accuracy']:.4f}")
     print()
+    print(f"  Team macro-F1      : {results['team_macro_f1']:.4f}")
     print(f"  Team accuracy      : {results['team_accuracy']:.4f}  (target > 0.78)")
+    print()
+    print("  Per-team F1:")
+    for label, f1 in results["per_team_f1"].items():
+        bar = "█" * int(f1 * 20)
+        print(f"    {label:<10}  {f1:.4f}  {bar}")
     print()
     print("  Per-class severity F1:")
     for label, f1 in results["per_class_f1"].items():
