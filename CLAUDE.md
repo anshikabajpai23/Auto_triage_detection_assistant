@@ -377,16 +377,19 @@ Tasks are grouped by phase. Work through them in order — each phase depends on
   - Logged per-head metrics to W&B
   - **Best checkpoint: `checkpoints/sft_weighted_oversample`**
 
-  | Run | Parse Fail | Macro-F1 | Sev Acc | Team Acc | P0 F1 | P4 F1 |
-  |---|---|---|---|---|---|---|
-  | Zero-shot baseline | 100% | 0.000 | 0.000 | 0.000 | 0.00 | 0.00 |
-  | Few-shot baseline | 17.1% | 0.5139 | 0.6458 | 0.5124 | 0.38 | 0.17 |
-  | SFT v1 | 18.7% | 0.4468 | 0.5829 | 0.6493 | 0.24 | 0.16 |
-  | Weighted loss | 17.8% | 0.4719 | 0.6157 | 0.6969 | 0.26 | 0.13 |
-  | **Weighted + oversampling** | **12.0%** | **0.5708** | **0.6812** | **0.8178 ✅** | **0.41** | **0.41** |
+  | Run | Parse Fail | Macro-F1 | Sev Acc | Team Acc | P0 F1 | P4 F1 | Notes |
+  |---|---|---|---|---|---|---|---|
+  | Zero-shot baseline | 100% | 0.000 | 0.000 | 0.000 | 0.00 | 0.00 | |
+  | Few-shot baseline | 17.1% | 0.5139 | 0.6458 | 0.5124 | 0.38 | 0.17 | |
+  | SFT v1 | 18.7% | 0.4468 | 0.5829 | 0.6493 | 0.24 | 0.16 | |
+  | Weighted loss | 17.8% | 0.4719 | 0.6157 | 0.6969 | 0.26 | 0.13 | |
+  | **Weighted + oversampling** | **12.0%** | **0.5708** | **0.6812** | **0.8178 ✅** | **0.41** | **0.41** | best SFT |
+  | Manual threshold (P0=2.0, P3=0.7, P4=1.8) | **0.0%** | 0.2615 | 0.2611 | 0.9380 | 0.37 | 0.38 | parse fail eliminated but macro-F1 collapsed — P3 F1=0, scales too aggressive |
 
   - Team accuracy target **met** (0.82 > 0.78) ✅
   - Severity macro-F1 still below 0.72 — DPO/PPO phase to close this gap
+  - Manual threshold: parse failure dropped to 0% (all outputs parseable) but severity accuracy collapsed — P3 never predicted, P4 absorbed uncertain predictions
+  - Next inference attempt: Bayes-optimal prior correction (`logit_i - log(prior_i)`) using val set frequencies
 
 ---
 
